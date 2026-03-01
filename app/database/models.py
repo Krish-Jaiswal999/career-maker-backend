@@ -15,6 +15,11 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Password reset OTP fields
+    reset_otp = Column(String, nullable=True)  # One-time password for password reset
+    otp_expiry = Column(DateTime, nullable=True)  # When OTP expires (10 minutes from generation)
+    otp_attempts = Column(Integer, default=0)  # Track failed OTP attempts
+    
     profile = relationship("Profile", back_populates="user", uselist=False)
     roadmaps = relationship("Roadmap", back_populates="user")
     projects = relationship("UserProject", back_populates="user")
@@ -119,11 +124,11 @@ class PortfolioInfo(Base):
     
     # Contact & Social
     email = Column(String)
-    linkedin_url = Column(String, nullable=True)
-    github_url = Column(String, nullable=True)
-    portfolio_url = Column(String, nullable=True)
-    twitter_url = Column(String, nullable=True)
-    personal_website = Column(String, nullable=True)
+    linkedin_url = Column(String, nullable=True)  # optional
+    github_url = Column(String, nullable=True)    # optional
+    portfolio_url = Column(String, nullable=True)  # optional; make website link optional per requirement
+    twitter_url = Column(String, nullable=True)   # optional
+    personal_website = Column(String, nullable=True)  # optional
     
     # Education
     highest_degree = Column(String)  # High School, Bachelor, Master, PhD

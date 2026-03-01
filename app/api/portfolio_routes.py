@@ -90,7 +90,7 @@ class PortfolioInfoSchema(BaseModel):
     email: str
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
-    portfolio_url: Optional[str] = None
+    portfolio_url: Optional[str] = None  # optional link to user's portfolio/website
     twitter_url: Optional[str] = None
     personal_website: Optional[str] = None
     highest_degree: str

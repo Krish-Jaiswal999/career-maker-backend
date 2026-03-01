@@ -7,10 +7,12 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import os
 import hashlib
+import secrets
 
 from app.database.database import get_db
 from app.database.models import User
 from app.schemas import TokenData
+from app.email_service import EmailService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -65,6 +67,77 @@ class AuthService:
         except JWTError:
             raise credentials_exception
         return token_data
+    
+    @staticmethod
+    def generate_otp() -> str:
+        """Generate a 6-digit OTP"""
+        return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    
+    @staticmethod
+    def create_password_reset_request(user: User) -> bool:
+        """
+        Create a password reset OTP for user
+        
+        Args:
+            user: User object to create OTP for
+            
+        Returns:
+            True if successful
+        """
+        from app.database.database import SessionLocal
+        
+        try:
+            db = SessionLocal()
+            otp = AuthService.generate_otp()
+            user.reset_otp = otp
+            user.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
+            user.otp_attempts = 0
+            db.commit()
+            
+            # Send OTP email
+            email_service = EmailService()
+            email_service.send_otp_email(user.email, otp, user.full_name)
+            
+            db.close()
+            return True
+        except Exception as e:
+            print(f"Error creating password reset: {str(e)}")
+            return False
+    
+    @staticmethod
+    def verify_otp(user: User, otp: str) -> bool:
+        """
+        Verify OTP for password reset
+        
+        Args:
+            user: User object
+            otp: OTP to verify
+            
+        Returns:
+            True if OTP is valid and not expired
+        """
+        if not user.reset_otp or not user.otp_expiry:
+            return False
+        
+        if datetime.utcnow() > user.otp_expiry:
+            return False
+        
+        if user.otp_attempts >= 3:
+            return False
+        
+        return user.reset_otp == otp
+    
+    @staticmethod
+    def clear_otp(user: User) -> None:
+        """Clear OTP and expiry from user"""
+        from app.database.database import SessionLocal
+        
+        db = SessionLocal()
+        user.reset_otp = None
+        user.otp_expiry = None
+        user.otp_attempts = 0
+        db.commit()
+        db.close()
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),

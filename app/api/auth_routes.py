@@ -4,7 +4,7 @@ Authentication & User Management API Routes
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from app.database.database import get_db
 from app.database.models import User, Profile
@@ -117,3 +117,100 @@ def get_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
     
     return ProfileOut.from_orm(profile)
+
+# Password Reset Endpoints
+
+@router.post("/forgot-password")
+def forgot_password(email: str, db: Session = Depends(get_db)):
+    """
+    Request password reset - sends OTP to email
+    """
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # Don't reveal if email exists for security
+        return {"message": "If email exists, OTP has been sent"}
+    
+    # Generate OTP and send email
+    otp = AuthService.generate_otp()
+    user.reset_otp = otp
+    user.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
+    user.otp_attempts = 0
+    db.commit()
+    
+    # Send OTP email
+    from app.email_service import EmailService
+    email_service = EmailService()
+    email_service.send_otp_email(user.email, otp, user.full_name)
+    
+    return {"message": "If email exists, OTP has been sent"}
+
+@router.post("/verify-otp")
+def verify_otp(email: str, otp: str, db: Session = Depends(get_db)):
+    """
+    Verify OTP sent to user's email
+    """
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check OTP
+    if not user.reset_otp or not user.otp_expiry:
+        raise HTTPException(status_code=400, detail="No password reset request found")
+    
+    if datetime.utcnow() > user.otp_expiry:
+        user.reset_otp = None
+        user.otp_expiry = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="OTP has expired. Request a new one.")
+    
+    if user.otp_attempts >= 3:
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Request a new OTP.")
+    
+    if user.reset_otp != otp:
+        user.otp_attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    
+    return {"message": "OTP verified successfully", "verified": True}
+
+@router.post("/reset-password")
+def reset_password(email: str, otp: str, new_password: str, db: Session = Depends(get_db)):
+    """
+    Reset password using verified OTP
+    """
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Verify OTP
+    if not user.reset_otp or not user.otp_expiry:
+        raise HTTPException(status_code=400, detail="No password reset request found")
+    
+    if datetime.utcnow() > user.otp_expiry:
+        user.reset_otp = None
+        user.otp_expiry = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="OTP has expired. Request a new one.")
+    
+    if user.reset_otp != otp:
+        user.otp_attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    
+    # Validate new password
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+    
+    # Update password
+    user.password_hash = AuthService.hash_password(new_password)
+    user.reset_otp = None
+    user.otp_expiry = None
+    user.otp_attempts = 0
+    db.commit()
+    
+    # Send confirmation email
+    from app.email_service import EmailService
+    email_service = EmailService()
+    email_service.send_password_reset_confirmation(user.email, user.full_name)
+    
+    return {"message": "Password reset successfully"}
